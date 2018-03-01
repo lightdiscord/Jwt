@@ -37,37 +37,9 @@ pub mod default;
 use default::RegisteredClaims;
 
 pub mod segments;
-use segments::Segments;
-
-use std::fmt;
+use segments::{ Segments, Payload, Header };
 
 const STANDARD_HEADER_TYPE: &str = "JWT";
-
-/// Jwt's Payload
-#[derive(Debug, Clone)]
-pub struct Payload(pub JsonValue);
-
-impl Payload {
-    /// Override specified Registered Claims
-    pub fn apply (self, claims: Vec<RegisteredClaims>) -> Payload {
-        let Payload(mut json) = self;
-
-        for claim in claims {
-            json[claim.to_string()] = claim.clone().into();
-        }
-
-        Payload(json)
-    }
-}
-
-impl fmt::Display for Payload {
-    fn fmt (&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let payload = serde_json::to_string(&self.0)
-            .map_err(|_| fmt::Error)?;
-        let payload = base64::encode_config(payload.as_bytes(), base64::URL_SAFE);
-        write!(f, "{}", payload)
-    }
-}
 
 /// A simple Jwt
 #[derive(Debug, Clone)]
@@ -76,17 +48,15 @@ pub struct Jwt(pub String);
 impl Jwt {
     /// Encode data into a Jwt
     pub fn encode<P: AsKey>(
-        header: &JsonValue,
+        header: &Header,
         payload: &Payload,
         signing_key: &P,
         algorithm: Algorithm,
     ) -> error::Result<Self> {
-        let mut header = header.clone();
+        let Header(mut header) = header.clone();
         header["alg"] = JsonValue::String(algorithm.to_string());
         header["typ"] = JsonValue::String(STANDARD_HEADER_TYPE.to_owned());
-
-        let header = serde_json::to_string(&header)?;
-        let header = ::base64::encode_config(header.as_bytes(), ::base64::URL_SAFE);
+        let header = Header(header);
 
         let sign = format!("{}.{}", header, payload);
 
@@ -108,12 +78,9 @@ impl Jwt {
     }
 
     /// Decode Token from a jwt
-    pub fn decode<P: AsKey>(&self, signing_key: &P) -> Result<(JsonValue, Payload)> {
+    pub fn decode<P: AsKey>(&self, signing_key: &P) -> Result<Segments> {
         let segments: Result<Segments> = self.clone().into();
         let Segments(header, payload, signature) = segments?;
-
-        let header = serde_json::to_string(&header)?;
-        let header = base64::encode_config(&header, base64::URL_SAFE);
 
         let combinaison = format!("{}.{}", header, payload);
 
@@ -122,14 +89,14 @@ impl Jwt {
         if !signature.verify(combinaison, signing_key)? {
             bail!(ErrorKind::InvalidSignature);
         } else {
-            Ok((JsonValue::String(header), payload))
+            Ok(Segments(header, payload, signature))
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ Jwt, Algorithm, Payload, RegisteredClaims };
+    use super::{ Jwt, Algorithm, Payload, RegisteredClaims, Header };
 
     #[test]
     fn test_sign_hs256 () {
@@ -144,7 +111,7 @@ mod tests {
         ]);
 
         let secret = "This is super mega secret!".to_string();
-        let header = json!({});
+        let header = Header(json!({}));
 
         let jwt = Jwt::encode(&header, &payload, &secret, Algorithm::HS256).unwrap();
         println!("{:?}", jwt);

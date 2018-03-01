@@ -12,11 +12,12 @@ use base64;
 use serde_json::{ self, Value };
 use std::convert::Into;
 use std::str::FromStr;
-use super::{ Jwt, Payload, Signature, Result, Algorithm, ErrorKind };
+use std::fmt;
+use super::{ Jwt, Signature, Result, Algorithm, ErrorKind, RegisteredClaims };
 
 /// Jwt segments
 #[derive(Debug, Clone)]
-pub struct Segments(pub Value, pub Payload, pub Signature);
+pub struct Segments(pub Header, pub Payload, pub Signature);
 
 impl Into<Result<Segments>> for Jwt {
     fn into (self) -> Result<Segments> {
@@ -43,7 +44,47 @@ impl Into<Result<Segments>> for Jwt {
 
         let signature = raw_segments[2];
         let signature = Signature(signature.to_string(), algorithm);
+        let header = Header(header);
 
         Ok(Segments(header, payload, signature))
+    }
+}
+
+/// Jwt's Payload
+#[derive(Debug, Clone)]
+pub struct Payload(pub Value);
+
+impl Payload {
+    /// Override specified Registered Claims
+    pub fn apply (self, claims: Vec<RegisteredClaims>) -> Payload {
+        let Payload(mut json) = self;
+
+        for claim in claims {
+            json[claim.to_string()] = claim.clone().into();
+        }
+
+        Payload(json)
+    }
+}
+
+impl fmt::Display for Payload {
+    fn fmt (&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let payload = serde_json::to_string(&self.0)
+            .map_err(|_| fmt::Error)?;
+        let payload = base64::encode_config(payload.as_bytes(), base64::URL_SAFE);
+        write!(f, "{}", payload)
+    }
+}
+
+/// Jwt's Header
+#[derive(Debug, Clone)]
+pub struct Header(pub Value);
+
+impl fmt::Display for Header {
+    fn fmt (&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let header = serde_json::to_string(&self.0)
+            .map_err(|_| fmt::Error)?;
+        let header = base64::encode_config(header.as_bytes(), base64::URL_SAFE);
+        write!(f, "{}", header)
     }
 }

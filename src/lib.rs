@@ -96,6 +96,8 @@ impl Jwt {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::path::PathBuf;
     use super::{ Jwt, Algorithm, Payload, RegisteredClaims, Header };
 
     #[test]
@@ -134,5 +136,60 @@ mod tests {
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
         let result = Jwt(jwt).decode(&secret);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sign_rs256 () {
+        let payload = json!({
+            "hello": "world",
+            "light": "discord"
+        });
+        let payload = Payload(payload);
+        let payload = payload.apply(vec![
+            RegisteredClaims::Issuer("Test-man!".to_string()),
+            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string())
+        ]);
+        let header = Header(json!({}));
+
+        let private_key = rsa_private_key();
+        let public_key = rsa_public_key();
+
+        let jwt = Jwt::encode(&header, &payload, &private_key, Algorithm::RS256).unwrap();
+        println!("{:?}", jwt);
+
+        let result = jwt.decode(&public_key);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_decode_valid_jwt_rs256 () {
+        let public_key = rsa_public_key();
+        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoiZGlzY29yZCJ9.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
+        let result = Jwt(jwt).decode(&public_key);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_decode_invalid_jwt_rs256 () {
+        let public_key = rsa_public_key();
+        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoicGFzIGRpc2NvcmQifQ.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
+        let result = Jwt(jwt).decode(&public_key);
+        assert!(result.is_err());
+    }
+
+    fn rsa_public_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("rsa.pub");
+
+        base_path
+    }
+
+    fn rsa_private_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("rsa.private.key");
+
+        base_path
     }
 }

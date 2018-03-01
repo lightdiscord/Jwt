@@ -19,11 +19,7 @@ extern crate openssl;
 #[macro_use]
 extern crate error_chain;
 
-#[cfg(test)]
 #[macro_use]
-extern crate serde_json;
-
-#[cfg(not(test))]
 extern crate serde_json;
 
 use serde_json::Value as JsonValue;
@@ -37,7 +33,38 @@ use algorithm::Algorithm;
 pub mod signature;
 use signature::{ Signature, AsKey };
 
+pub mod default;
+use default::RegisteredClaims;
+
+use std::fmt;
+
 const STANDARD_HEADER_TYPE: &str = "JWT";
+
+/// Jwt's Payload
+#[derive(Debug)]
+pub struct Payload(pub JsonValue);
+
+impl Payload {
+    /// Override specified Registered Claims
+    pub fn apply (self, claims: Vec<RegisteredClaims>) -> Payload {
+        let Payload(mut json) = self;
+
+        for claim in claims {
+            json[claim.to_string()] = claim.clone().into();
+        }
+
+        Payload(json)
+    }
+}
+
+impl fmt::Display for Payload {
+    fn fmt (&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let payload = serde_json::to_string(&self.0)
+            .map_err(|_| fmt::Error)?;
+        let payload = base64::encode_config(payload.as_bytes(), base64::URL_SAFE);
+        write!(f, "{}", payload)
+    }
+}
 
 /// A simple Jwt
 #[derive(Debug)]
@@ -46,21 +73,17 @@ pub struct Jwt(pub String);
 impl Jwt {
     /// Encode data into a Jwt
     pub fn encode<P: AsKey>(
-        header: JsonValue,
-        payload: &JsonValue,
+        header: &JsonValue,
+        payload: &Payload,
         signing_key: &P,
         algorithm: Algorithm,
     ) -> error::Result<Self> {
         let mut header = header.clone();
         header["alg"] = JsonValue::String(algorithm.to_string());
         header["typ"] = JsonValue::String(STANDARD_HEADER_TYPE.to_owned());
-        let header = header;
 
         let header = serde_json::to_string(&header)?;
         let header = ::base64::encode_config(header.as_bytes(), ::base64::URL_SAFE);
-
-        let payload = serde_json::to_string(&payload)?;
-        let payload = ::base64::encode_config(payload.as_bytes(), ::base64::URL_SAFE);
 
         let sign = format!("{}.{}", header, payload);
 
@@ -122,7 +145,7 @@ fn decode_segments (token: &Jwt) -> Result<(JsonValue, JsonValue, Vec<u8>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{ Jwt, Algorithm };
+    use super::{ Jwt, Algorithm, Payload, RegisteredClaims };
 
     #[test]
     fn test_sign_hs256 () {
@@ -130,11 +153,16 @@ mod tests {
             "hello": "world",
             "light": "discord"
         });
+        let payload = Payload(payload);
+        let payload = payload.apply(vec![
+            RegisteredClaims::Issuer("Test-man!".to_string()),
+            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string())
+        ]);
 
         let secret = "This is super mega secret!".to_string();
         let header = json!({});
 
-        let jwt = Jwt::encode(header, &payload, &secret, Algorithm::HS256).unwrap();
+        let jwt = Jwt::encode(&header, &payload, &secret, Algorithm::HS256).unwrap();
         println!("{:?}", jwt);
 
         let result = jwt.decode(&secret, Algorithm::HS256);

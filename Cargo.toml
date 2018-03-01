@@ -12,6 +12,7 @@ name = "libjwt"
 path = "src/lib.rs"
 
 [dependencies]
+error-chain = "0.11.0"
 
 [features]
 default = []

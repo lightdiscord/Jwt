@@ -18,9 +18,14 @@ error_chain!{
     }
 
     errors {
-        InvalidAlgorithm(algo: &'static str) {
+        InvalidAlgorithm {
             description("invalid algorithm"),
-            display("invalid '{}', algorithm", algo)
+            display("invalid algorithm")
+        }
+
+        MissingAlgorithm {
+            description("missing algorithm"),
+            display("can't find algo used by the jwt")
         }
 
         InvalidJwt {

@@ -47,7 +47,7 @@ impl AsKey for String {
 }
 
 /// Signature operations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Signature(pub String, pub Algorithm);
 
 impl fmt::Display for Signature {

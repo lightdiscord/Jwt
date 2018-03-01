@@ -36,12 +36,15 @@ use signature::{ Signature, AsKey };
 pub mod default;
 use default::RegisteredClaims;
 
+pub mod segments;
+use segments::Segments;
+
 use std::fmt;
 
 const STANDARD_HEADER_TYPE: &str = "JWT";
 
 /// Jwt's Payload
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Payload(pub JsonValue);
 
 impl Payload {
@@ -67,7 +70,7 @@ impl fmt::Display for Payload {
 }
 
 /// A simple Jwt
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Jwt(pub String);
 
 impl Jwt {
@@ -105,42 +108,23 @@ impl Jwt {
     }
 
     /// Decode Token from a jwt
-    pub fn decode<P: AsKey>(&self, signing_key: &P, algorithm: Algorithm) -> Result<(JsonValue, JsonValue)> {
-        let (header, payload, signature, input) = decode_segments(self)?;
-        let signature = Signature(base64::encode_config(&signature.clone(), base64::URL_SAFE), algorithm);
+    pub fn decode<P: AsKey>(&self, signing_key: &P) -> Result<(JsonValue, Payload)> {
+        let segments: Result<Segments> = self.clone().into();
+        let Segments(header, payload, signature) = segments?;
+
+        let header = serde_json::to_string(&header)?;
+        let header = base64::encode_config(&header, base64::URL_SAFE);
+
+        let combinaison = format!("{}.{}", header, payload);
+
         println!("{:?}", signature);
 
-        if !signature.verify(input, signing_key)? {
+        if !signature.verify(combinaison, signing_key)? {
             bail!(ErrorKind::InvalidSignature);
         } else {
-            Ok((header, payload))
+            Ok((JsonValue::String(header), payload))
         }
     }
-}
-
-fn decode_segments (token: &Jwt) -> Result<(JsonValue, JsonValue, Vec<u8>, String)> {
-    let &Jwt(ref token) = token;
-    let raw_segments: Vec<&str> = token.split(".").collect();
-    if raw_segments.len() != 3 {
-        bail!(ErrorKind::InvalidJwt);
-    }
-
-    let header = raw_segments[0];
-    let payload = raw_segments[1];
-    let input = format!("{}.{}", header, payload);
-
-    let header = base64::decode_config(&header, base64::URL_SAFE)?;
-    let header = header.as_slice();
-    let header = serde_json::from_slice(header)?;
-
-    let payload = base64::decode_config(&payload, base64::URL_SAFE)?;
-    let payload = payload.as_slice();
-    let payload = serde_json::from_slice(payload)?;
-
-    let signature = raw_segments[2];
-    let signature = base64::decode_config(signature.as_bytes(), base64::URL_SAFE)?;
-
-    Ok((header, payload, signature, input))
 }
 
 #[cfg(test)]
@@ -165,7 +149,7 @@ mod tests {
         let jwt = Jwt::encode(&header, &payload, &secret, Algorithm::HS256).unwrap();
         println!("{:?}", jwt);
 
-        let result = jwt.decode(&secret, Algorithm::HS256);
+        let result = jwt.decode(&secret);
         assert!(result.is_ok());
     }
 
@@ -173,7 +157,7 @@ mod tests {
     fn test_decode_valid_jwt_hs256 () {
         let secret = "This is super mega secret!".to_string();
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let result = Jwt(jwt).decode(&secret, Algorithm::HS256);
+        let result = Jwt(jwt).decode(&secret);
         assert!(result.is_ok());
     }
 
@@ -181,7 +165,7 @@ mod tests {
     fn test_decode_invalid_jwt_hs256 () {
         let secret = "This is super secret!".to_string();
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let result = Jwt(jwt).decode(&secret, Algorithm::HS256);
+        let result = Jwt(jwt).decode(&secret);
         assert!(result.is_err());
     }
 }

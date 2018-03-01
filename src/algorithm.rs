@@ -9,7 +9,9 @@
 //! Algorithms used for Jwt signature
 
 use std::convert::Into;
+use std::str::FromStr;
 use openssl::hash::MessageDigest;
+use super::{ Error, Result, ErrorKind };
 
 /// Different algorithms use to sign a jwt
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,5 +75,24 @@ impl ToString for Algorithm {
             Algorithm::ES384 => "ES384",
             Algorithm::ES512 => "ES512",
         }.to_string()
+    }
+}
+
+impl FromStr for Algorithm {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "HS256" => Algorithm::HS256,
+            "HS384" => Algorithm::HS384,
+            "HS512" => Algorithm::HS512,
+            "RS256" => Algorithm::RS256,
+            "RS384" => Algorithm::RS384,
+            "RS512" => Algorithm::RS512,
+            "ES256" => Algorithm::ES256,
+            "ES384" => Algorithm::ES384,
+            "ES512" => Algorithm::ES512,
+            _ => bail!(ErrorKind::InvalidAlgorithm)
+        })
     }
 }

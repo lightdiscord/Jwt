@@ -8,6 +8,29 @@
 
 //! Collection of Jwt Errors.
 
-error_chain! {
+#![allow(missing_docs)]
+error_chain!{
+    foreign_links {
+        Io(::std::io::Error);
+        Serde(::serde_json::Error);
+        OpenSsl(::openssl::error::ErrorStack);
+        Base64(::base64::DecodeError);
+    }
 
+    errors {
+        InvalidAlgorithm(algo: &'static str) {
+            description("invalid algorithm"),
+            display("invalid '{}', algorithm", algo)
+        }
+
+        InvalidJwt {
+            description("invalid jwt"),
+            display("invalid jwt")
+        }
+
+        InvalidSignature {
+            description("invalid signature"),
+            display("invalid signautre")
+        }
+    }
 }

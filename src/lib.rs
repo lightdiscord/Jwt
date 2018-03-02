@@ -10,25 +10,27 @@
 //!
 //! Another JWT implementation written in Rust
 
-//#![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
-
-#![feature(underscore_lifetimes)]
+#![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
 
 use std::borrow::Cow;
-use std::convert::From;
 
+/// A Simple Jwt
 #[derive(Debug)]
 pub struct Jwt<'jwt>(Cow<'jwt, str>);
 
 impl<'jwt> Jwt<'jwt> {
+    /// Create a Jwt from any type who can be turned into a `Cow<'jwt, str>`
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'jwt, str>> {
         Jwt(raw.into())
     }
 }
 
+/// Transform something into Jwt's parts
 pub trait IntoParts<'c> {
+    /// Error type from a convertion
     type Error;
 
+    /// Convert it!
     fn into_parts (&'c self) -> Result<Parts, Self::Error>;
 }
 
@@ -52,6 +54,7 @@ impl<'jwt> IntoParts<'jwt> for Jwt<'jwt> {
     }
 }
 
+/// Jwt's parts
 #[derive(Debug)]
 pub struct Parts<'h, 'p, 's> {
     header: Header<'h>,
@@ -59,28 +62,34 @@ pub struct Parts<'h, 'p, 's> {
     signature: Signature<'s>
 }
 
+/// Jwt's header
 #[derive(Debug)]
 pub struct Header<'h>(Cow<'h, str>);
 
 impl<'h> Header<'h> {
+    /// Create a Jwt's header from any type who can be turned into a `Cow<'h, str>`
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'h, str>> {
         Header(raw.into())
     }
 }
 
+/// Jwt's payload
 #[derive(Debug)]
 pub struct Payload<'p>(Cow<'p, str>);
 
 impl<'p> Payload<'p> {
+    /// Create a Jwt's payload from any type who can be turned into a `Cow<'p, str>`
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'p, str>> {
         Payload(raw.into())
     }
 }
 
+/// Jwt's signature
 #[derive(Debug)]
 pub struct Signature<'s>(Cow<'s, str>);
 
 impl<'s> Signature<'s> {
+    /// Create a Jwt's signature from any type who can be turned into a `Cow<'s, str>`
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'s, str>> {
         Signature(raw.into())
     }
@@ -88,7 +97,6 @@ impl<'s> Signature<'s> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
     use super::{ Jwt, IntoParts };
 
     #[test]

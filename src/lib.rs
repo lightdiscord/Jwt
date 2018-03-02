@@ -33,11 +33,14 @@ use algorithm::Algorithm;
 pub mod signature;
 use signature::{ Signature, AsKey };
 
-pub mod default;
-use default::RegisteredClaims;
+pub mod claims;
+use claims::RegisteredClaims;
 
 pub mod segments;
 use segments::{ Segments, Payload, Header };
+
+pub mod verification;
+use verification::Verifications;
 
 const STANDARD_HEADER_TYPE: &str = "JWT";
 
@@ -98,10 +101,13 @@ impl Jwt {
 mod tests {
     use std::env;
     use std::path::PathBuf;
-    use super::{ Jwt, Algorithm, Payload, RegisteredClaims, Header };
+    use std::time::{ SystemTime, UNIX_EPOCH };
+    use super::{ Jwt, Algorithm, Payload, RegisteredClaims, Header, Verifications, Segments };
 
     #[test]
     fn test_sign_hs256 () {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
         let payload = json!({
             "hello": "world",
             "light": "discord"
@@ -109,7 +115,9 @@ mod tests {
         let payload = Payload(payload);
         let payload = payload.apply(vec![
             RegisteredClaims::Issuer("Test-man!".to_string()),
-            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string())
+            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string()),
+            RegisteredClaims::IssuedAt(now),
+            RegisteredClaims::ExpirationTime(now + 10)
         ]);
 
         let secret = "This is super mega secret!".to_string();
@@ -140,6 +148,8 @@ mod tests {
 
     #[test]
     fn test_sign_rs256 () {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
         let payload = json!({
             "hello": "world",
             "light": "discord"
@@ -147,7 +157,9 @@ mod tests {
         let payload = Payload(payload);
         let payload = payload.apply(vec![
             RegisteredClaims::Issuer("Test-man!".to_string()),
-            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string())
+            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string()),
+            RegisteredClaims::IssuedAt(now),
+            RegisteredClaims::ExpirationTime(now + 10)
         ]);
         let header = Header(json!({}));
 
@@ -167,6 +179,21 @@ mod tests {
         let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoiZGlzY29yZCJ9.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
         let result = Jwt(jwt).decode(&public_key);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_decode_expired_jwt_rs256 () {
+        let public_key = rsa_public_key();
+        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==.UqoZACmQeU3Cr1mcvMLdzqErJs_JaC7KClxDgQtt_J2d5dH_YCUzS11w0xE5Q09Ba7nA1UW3xgW6NYTpRNTnHETROJxPJ4GsTfyhLKbtFAoZy78VbLmXOpYvY1abF5dWxICJjY6sARUGajiZEK827Yt6Iiom0Mq0lwuuraW9xWLZjpZNuq1TDy5FuZRwx-fIPpo3_okHZoN5g3hrW_uTLqlsjJlotFvyfXJDhS1xPmyPjl1bH3ljuMv1HrTEOe3Gep1a0Mmbu3cjq9zee1fb46rrgpogap4N_DuLSJrgDvY7MVOXDNYAgllijeVhD2Xr1shCW8sIJ3RDaoQME5YW3Q==".to_string();
+        let result = Jwt(jwt).decode(&public_key).unwrap();
+        let Segments(_, payload, _) = result;
+
+        let result = payload.verify(vec![
+            Verifications::SameClaim(RegisteredClaims::Issuer("Test-man!".to_string())),
+            Verifications::Expired
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]

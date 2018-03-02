@@ -13,7 +13,9 @@ use serde_json::{ self, Value };
 use std::convert::Into;
 use std::str::FromStr;
 use std::fmt;
-use super::{ Jwt, Signature, Result, Algorithm, ErrorKind, RegisteredClaims };
+use std::time::{ SystemTime, UNIX_EPOCH };
+use std::string::ToString;
+use super::{ Jwt, Signature, Result, Algorithm, ErrorKind, RegisteredClaims, Verifications };
 
 /// Jwt segments
 #[derive(Debug, Clone)]
@@ -64,6 +66,34 @@ impl Payload {
         }
 
         Payload(json)
+    }
+
+    /// Verify if payload is valid
+    pub fn verify (&self, verifications: Vec<Verifications>) -> Result<()> {
+        let &Payload(ref json) = self;
+
+        for verification in verifications {
+            match verification {
+                Verifications::SameClaim(claim) => {
+                    let json = &json[claim.to_string()];
+                    let claim: Value = claim.clone().into();
+
+                    if *json != claim {
+                        bail!(ErrorKind::VerificationFailed("same_claim".to_string()))
+                    }
+                },
+                Verifications::Expired => {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+                    let exp = json["exp"].as_u64();
+
+                    if exp <= Some(now) {
+                        bail!(ErrorKind::VerificationFailed("token_expired".to_string()))
+                    }
+                }
+            };
+        }
+
+        Ok(())
     }
 }
 

@@ -6,42 +6,16 @@
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-//! Collection of Jwt Errors.
+//! Verify if a JWT payload is valid
 
-#![allow(missing_docs)]
-error_chain!{
-    foreign_links {
-        Io(::std::io::Error);
-        Serde(::serde_json::Error);
-        OpenSsl(::openssl::error::ErrorStack);
-        Base64(::base64::DecodeError);
-        Time(::std::time::SystemTimeError);
-    }
+use super::claims::RegisteredClaims;
 
-    errors {
-        InvalidAlgorithm {
-            description("invalid algorithm"),
-            display("invalid algorithm")
-        }
+/// Some verifications
+#[derive(Debug, Clone, PartialEq)]
+pub enum Verifications {
+    /// Verify if you've the value expected
+    SameClaim(RegisteredClaims),
 
-        MissingAlgorithm {
-            description("missing algorithm"),
-            display("can't find algo used by the jwt")
-        }
-
-        InvalidJwt {
-            description("invalid jwt"),
-            display("invalid jwt")
-        }
-
-        InvalidSignature {
-            description("invalid signature"),
-            display("invalid signautre")
-        }
-
-        VerificationFailed (fail: String) {
-            description("verification step failed"),
-            display("verification step failed: '{}'", fail)
-        }
-    }
+    /// Check if token is expired
+    Expired
 }

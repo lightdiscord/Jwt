@@ -9,6 +9,7 @@
 //! Registered Claim Names
 
 use std::convert::Into;
+use std::string::ToString;
 use serde_json::Value;
 
 /// Different Registered Claims

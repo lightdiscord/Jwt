@@ -11,7 +11,7 @@
 use std::convert::Into;
 use std::str::FromStr;
 use openssl::hash::MessageDigest;
-use super::{ Error, Result, ErrorKind };
+use ::error::{ Error, Result, ErrorKind };
 
 /// Different algorithms use to sign a jwt
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

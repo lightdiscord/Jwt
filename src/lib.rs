@@ -12,7 +12,15 @@
 
 #![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
 
+extern crate openssl;
+#[macro_use] extern crate error_chain;
+
 use std::borrow::Cow;
+
+pub mod algorithm;
+pub mod error;
+
+pub use error::Error;
 
 /// A Simple Jwt
 #[derive(Debug)]

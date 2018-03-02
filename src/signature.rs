@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::io::Read;
 use std::convert::Into;
 use std::fmt;
+use std::borrow::Cow;
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
@@ -48,15 +49,19 @@ impl AsKey for String {
 
 /// Signature operations
 #[derive(Debug, Clone)]
-pub struct Signature(pub String, pub Algorithm);
+pub struct Signature<'signature>(pub Cow<'signature, str>, pub Algorithm);
 
-impl fmt::Display for Signature {
+impl<'signature> fmt::Display for Signature<'signature> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl Signature {
+impl<'signature> Signature<'signature> {
+    pub fn new<S>(raw: S, algorithm: Algorithm) -> Self where S: Into<Cow<'signature, str>> {
+        Signature(raw.into(), algorithm)
+    }
+
     /// Sign a jwt using HMAC
     pub fn hmac<P: AsKey>(data: &str, key_path: &P, algorithm: Algorithm) -> Result<Self> {
         let digest: MessageDigest = algorithm.into();
@@ -67,7 +72,7 @@ impl Signature {
         let signature = signer.sign_to_vec()?;
         let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
 
-        Ok(Signature(signature, algorithm))
+        Ok(Signature::new(signature, algorithm))
     }
 
     /// Sign a jwt using RSA
@@ -83,7 +88,7 @@ impl Signature {
         let signature = signer.sign_to_vec()?;
         let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
 
-        Ok(Signature(signature, algorithm))
+        Ok(Signature::new(signature, algorithm))
     }
 
     /// Sign a jwt using ECDSA
@@ -99,13 +104,14 @@ impl Signature {
         let signature = signer.sign_to_vec()?;
         let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
 
-        Ok(Signature(signature, algorithm))
+        Ok(Signature::new(signature, algorithm))
     }
 
     /// Verify if a signature is valid
     pub fn verify<P: AsKey>(&self, data: String, key: &P) -> Result<bool> {
         let &Signature(ref signature, algorithm) = self;
-        let signature = &base64::decode_config(signature, base64::URL_SAFE)?;
+        let signature = signature.clone().into_owned();
+        let signature = &base64::decode_config(&signature, base64::URL_SAFE)?;
 
         match algorithm {
             Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {

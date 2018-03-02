@@ -8,6 +8,8 @@
 
 //! Jwt segments
 
+#![allow(unused_imports)]
+
 use base64;
 use serde_json::{ self, Value };
 use std::convert::Into;
@@ -15,16 +17,19 @@ use std::str::FromStr;
 use std::fmt;
 use std::time::{ SystemTime, UNIX_EPOCH };
 use std::string::ToString;
-use super::{ Jwt, Signature, Result, Algorithm, ErrorKind, RegisteredClaims, Verifications };
+use super::{ Jwt, Result, Algorithm, ErrorKind, RegisteredClaims, Verifications };
+pub use ::signature::Signature;
+use std::borrow::{ Borrow };
 
 /// Jwt segments
 #[derive(Debug, Clone)]
-pub struct Segments(pub Header, pub Payload, pub Signature);
+pub struct Segments<'segments>(pub Header, pub Payload, pub Signature<'segments>);
 
-impl Into<Result<Segments>> for Jwt {
-    fn into (self) -> Result<Segments> {
+impl<'jwt> Into<Result<Segments<'jwt>>> for Jwt<'jwt> {
+    fn into (self) -> Result<Segments<'jwt>> {
         let Jwt(token) = self;
         let raw_segments: Vec<&str> = token.split(".").collect();
+
         if raw_segments.len() != 3 {
             bail!(ErrorKind::InvalidJwt);
         }
@@ -45,7 +50,7 @@ impl Into<Result<Segments>> for Jwt {
         let algorithm = Algorithm::from_str(algorithm)?;
 
         let signature = raw_segments[2];
-        let signature = Signature(signature.to_string(), algorithm);
+        let signature = Signature::new(signature, algorithm);
         let header = Header(header);
 
         Ok(Segments(header, payload, signature))

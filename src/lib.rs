@@ -10,8 +10,119 @@
 //!
 //! Another JWT implementation written in Rust
 
-#![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
+//#![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
 
+#![feature(underscore_lifetimes)]
+
+use std::borrow::Cow;
+use std::convert::From;
+
+#[derive(Debug)]
+pub struct Jwt<'jwt>(Cow<'jwt, str>);
+
+impl<'jwt> Jwt<'jwt> {
+    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'jwt, str>> {
+        Jwt(raw.into())
+    }
+}
+
+pub trait IntoParts<'c> {
+    type Error;
+
+    fn into_parts (&'c self) -> Result<Parts, Self::Error>;
+}
+
+impl<'jwt> IntoParts<'jwt> for Jwt<'jwt> {
+    type Error = ();
+
+    fn into_parts (&'jwt self) -> Result<Parts, Self::Error> {
+        let parts: Vec<&'jwt str> = self.0.split(".").collect();
+
+        if parts.len() != 3 {
+            unimplemented!()
+        }
+
+        let parts = Parts {
+            header: Header::new(parts[0]),
+            payload: Payload::new(parts[1]),
+            signature: Signature::new(parts[2])
+        };
+
+        Ok(parts)
+    }
+}
+
+#[derive(Debug)]
+pub struct Parts<'h, 'p, 's> {
+    header: Header<'h>,
+    payload: Payload<'p>,
+    signature: Signature<'s>
+}
+
+#[derive(Debug)]
+pub struct Header<'h>(Cow<'h, str>);
+
+impl<'h> Header<'h> {
+    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'h, str>> {
+        Header(raw.into())
+    }
+}
+
+#[derive(Debug)]
+pub struct Payload<'p>(Cow<'p, str>);
+
+impl<'p> Payload<'p> {
+    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'p, str>> {
+        Payload(raw.into())
+    }
+}
+
+#[derive(Debug)]
+pub struct Signature<'s>(Cow<'s, str>);
+
+impl<'s> Signature<'s> {
+    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'s, str>> {
+        Signature(raw.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+    use super::{ Jwt, IntoParts };
+
+    #[test]
+    fn jwt_from_str () {
+        let s = test_jwt();
+        let jwt = Jwt::new(s);
+
+        assert_eq!(jwt.0.into_owned(), String::from(s));
+    }
+
+    #[test]
+    fn jwt_from_string () {
+        let s = test_jwt();
+        let s = String::from(s);
+        let jwt = Jwt::new(s.clone());
+
+        assert_eq!(jwt.0.into_owned(), s);
+    }
+
+    #[test]
+    fn jwt_into_parts () {
+        let s = test_jwt();
+        let jwt = Jwt::new(s);
+        let parts = jwt.into_parts();
+
+        println!("{:?}", parts);
+    }
+
+    fn test_jwt () -> &'static str {
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==.gS76BWOStsnrG9nMacQQE7ThHM1UIR2omB6YkBaQjZ0="
+    }
+}
+
+/*
 //extern crate serde;
 extern crate base64;
 extern crate openssl;
@@ -42,13 +153,19 @@ use segments::{ Segments, Payload, Header };
 pub mod verification;
 use verification::Verifications;
 
+use std::borrow::Cow;
+
 const STANDARD_HEADER_TYPE: &str = "JWT";
 
 /// A simple Jwt
 #[derive(Debug, Clone)]
-pub struct Jwt(pub String);
+pub struct Jwt<'jwt>(pub Cow<'jwt, str>);
 
-impl Jwt {
+impl<'jwt> Jwt<'jwt> {
+    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'jwt, str>> {
+        Jwt(raw.into())
+    }
+
     /// Encode data into a Jwt
     pub fn encode<P: AsKey>(
         header: &Header,
@@ -75,7 +192,7 @@ impl Jwt {
             }
         };
 
-        let token = Jwt(format!("{}.{}", sign, signature));
+        let token = Jwt::new(format!("{}.{}", sign, signature));
 
         Ok(token)
     }
@@ -134,7 +251,8 @@ mod tests {
     fn test_decode_valid_jwt_hs256 () {
         let secret = "This is super mega secret!".to_string();
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let result = Jwt(jwt).decode(&secret);
+        let jwt = Jwt::new(jwt);
+        let result = jwt.decode(&secret);
         assert!(result.is_ok());
     }
 
@@ -142,7 +260,8 @@ mod tests {
     fn test_decode_invalid_jwt_hs256 () {
         let secret = "This is super secret!".to_string();
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let result = Jwt(jwt).decode(&secret);
+        let jwt = Jwt::new(jwt);
+        let result = jwt.decode(&secret);
         assert!(result.is_err());
     }
 
@@ -177,7 +296,8 @@ mod tests {
     fn test_decode_valid_jwt_rs256 () {
         let public_key = rsa_public_key();
         let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoiZGlzY29yZCJ9.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
-        let result = Jwt(jwt).decode(&public_key);
+        let jwt = Jwt::new(jwt);
+        let result = jwt.decode(&public_key);
         assert!(result.is_ok());
     }
 
@@ -185,7 +305,8 @@ mod tests {
     fn test_decode_expired_jwt_rs256 () {
         let public_key = rsa_public_key();
         let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==.UqoZACmQeU3Cr1mcvMLdzqErJs_JaC7KClxDgQtt_J2d5dH_YCUzS11w0xE5Q09Ba7nA1UW3xgW6NYTpRNTnHETROJxPJ4GsTfyhLKbtFAoZy78VbLmXOpYvY1abF5dWxICJjY6sARUGajiZEK827Yt6Iiom0Mq0lwuuraW9xWLZjpZNuq1TDy5FuZRwx-fIPpo3_okHZoN5g3hrW_uTLqlsjJlotFvyfXJDhS1xPmyPjl1bH3ljuMv1HrTEOe3Gep1a0Mmbu3cjq9zee1fb46rrgpogap4N_DuLSJrgDvY7MVOXDNYAgllijeVhD2Xr1shCW8sIJ3RDaoQME5YW3Q==".to_string();
-        let result = Jwt(jwt).decode(&public_key).unwrap();
+        let jwt = Jwt::new(jwt);
+        let result = jwt.decode(&public_key).unwrap();
         let Segments(_, payload, _) = result;
 
         let result = payload.verify(vec![
@@ -200,7 +321,8 @@ mod tests {
     fn test_decode_invalid_jwt_rs256 () {
         let public_key = rsa_public_key();
         let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoicGFzIGRpc2NvcmQifQ.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
-        let result = Jwt(jwt).decode(&public_key);
+        let jwt = Jwt::new(jwt);
+        let result = jwt.decode(&public_key);
         assert!(result.is_err());
     }
 
@@ -220,3 +342,4 @@ mod tests {
         base_path
     }
 }
+*/

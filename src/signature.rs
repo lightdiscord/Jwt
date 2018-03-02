@@ -8,6 +8,35 @@
 
 //! Sign or verify a signature
 
+use ::error::{ Result };
+
+/// Transform something into a secret, a public or private key
+pub trait AsKey {
+    /// Convert it!
+    fn as_key(&self) -> Result<Vec<u8>>;
+}
+
+impl AsKey for ::std::path::PathBuf {
+    fn as_key(&self) -> Result<Vec<u8>> {
+        use std::io::Read;
+
+        let mut file = ::std::fs::File::open(self)?;
+        let mut buffer: Vec<u8> = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        Ok(buffer)
+    }
+}
+
+impl AsKey for String {
+    fn as_key(&self) -> Result<Vec<u8>> {
+        Ok(self.as_bytes().to_vec())
+    }
+}
+
+
+
+/*
 use std::fs::File;
 use std::path::PathBuf;
 use std::io::Read;
@@ -184,3 +213,4 @@ mod tests {
         assert!(!result);
     }
 }
+*/

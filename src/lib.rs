@@ -13,14 +13,19 @@
 #![deny(missing_docs, unsafe_code, unused_extern_crates, warnings)]
 
 extern crate openssl;
+extern crate base64;
+extern crate serde_json;
 #[macro_use] extern crate error_chain;
 
 use std::borrow::Cow;
 
-pub mod algorithm;
 pub mod error;
+pub mod algorithm;
+pub mod signature;
 
 pub use error::Error;
+
+use serde_json::Value;
 
 /// A Simple Jwt
 #[derive(Debug)]
@@ -59,6 +64,20 @@ impl<'jwt> IntoParts<'jwt> for Jwt<'jwt> {
         };
 
         Ok(parts)
+    }
+}
+
+/// Transform something into base64
+trait AsBase64 {
+
+    /// Convert it!
+    fn as_base64 (&self) -> error::Result<String>;
+}
+
+impl AsBase64 for Value {
+    fn as_base64 (&self) -> error::Result<String> {
+        let value = serde_json::to_string(&self)?;
+        Ok(base64::encode_config(value.as_bytes(), base64::URL_SAFE))
     }
 }
 

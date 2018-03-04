@@ -8,18 +8,28 @@
 
 //! Sign or verify a signature
 
-use ::error::{ Result };
+use ::error;
+use ::Signature;
+use ::algorithm::Algorithm;
+
+use std::io::Read;
+
+use openssl::hash::MessageDigest;
+use openssl::pkey::PKey;
+//use openssl::rsa::Rsa;
+use openssl::sign::{Signer/*, Verifier*/};
+//use openssl::ec::EcKey;
+
+use base64;
 
 /// Transform something into a secret, a public or private key
 pub trait AsKey {
     /// Convert it!
-    fn as_key(&self) -> Result<Vec<u8>>;
+    fn as_key(&self) -> error::Result<Vec<u8>>;
 }
 
 impl AsKey for ::std::path::PathBuf {
-    fn as_key(&self) -> Result<Vec<u8>> {
-        use std::io::Read;
-
+    fn as_key(&self) -> error::Result<Vec<u8>> {
         let mut file = ::std::fs::File::open(self)?;
         let mut buffer: Vec<u8> = Vec::new();
         file.read_to_end(&mut buffer)?;
@@ -29,12 +39,85 @@ impl AsKey for ::std::path::PathBuf {
 }
 
 impl AsKey for String {
-    fn as_key(&self) -> Result<Vec<u8>> {
+    fn as_key(&self) -> error::Result<Vec<u8>> {
         Ok(self.as_bytes().to_vec())
     }
 }
 
+/// HMAC Algorithm
+pub struct HMAC;
 
+/// RSA Algorithm
+pub struct RSA;
+
+/// ECDSA Algorithm
+pub struct ECDSA;
+
+/// Signature with an algorithm bound to it
+#[derive(Debug)]
+pub struct BindSignature<'s> (pub Signature<'s>, pub Algorithm);
+
+/// Sign something and verify signature
+pub trait Sign {
+    /// Error Result
+    type Error;
+
+    /// Sign something
+    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> Result<BindSignature<'data>, Self::Error>;
+
+    /// Verify signature
+    fn verify<K: AsKey>(signature: BindSignature, data: &str, key: &K) -> Result<bool, Self::Error>;
+}
+
+impl Sign for HMAC {
+    type Error = error::Error;
+
+    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> Result<BindSignature<'data>, Self::Error> {
+        let digest: MessageDigest = algorithm.into();
+
+        let key = PKey::hmac(&key.as_key()?)?;
+        let mut signer = Signer::new(digest, &key)?;
+        let _ = signer.update(data.as_bytes())?;
+
+        let signature = signer.sign_to_vec()?;
+        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
+        let signature = BindSignature(Signature::new(signature), algorithm);
+
+        Ok(signature)
+    }
+
+    fn verify<K: AsKey>(signature: BindSignature, data: &str, key: &K) -> error::Result<bool> {
+        let BindSignature(signature, algorithm) = signature;
+        let Signature(signature) = signature;
+        let signature = signature.into_owned();
+        let signature = base64::decode_config(&signature, base64::URL_SAFE)?;
+
+        let digest: MessageDigest = algorithm.into();
+
+        let key = &key.as_key()?;
+        let key = PKey::hmac(key)?;
+        let mut signer = Signer::new(digest, &key)?;
+        signer.update(data.as_bytes())?;
+        let other_signature = signer.sign_to_vec()?;
+
+        Ok(signature == other_signature)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hmac() {
+        let secret = "This is super mega secret!".to_string();
+        let header_and_body = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==";
+        let signature = HMAC::sign(header_and_body, &secret, Algorithm::HS256).unwrap();
+
+        assert_eq!(signature.0, Signature::new("gS76BWOStsnrG9nMacQQE7ThHM1UIR2omB6YkBaQjZ0="));
+        assert!(HMAC::verify(signature, header_and_body, &secret).unwrap());
+    }
+}
 
 /*
 use std::fs::File;

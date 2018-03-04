@@ -112,7 +112,7 @@ impl<'p> Payload<'p> {
 }
 
 /// Jwt's signature
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Signature<'s>(Cow<'s, str>);
 
 impl<'s> Signature<'s> {

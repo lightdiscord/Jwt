@@ -13,7 +13,7 @@ error_chain!{
     foreign_links {
         Io(::std::io::Error);
         Serde(::serde_json::Error);
-        //OpenSsl(::openssl::error::ErrorStack);
+        OpenSsl(::openssl::error::ErrorStack);
         Base64(::base64::DecodeError);
         //Time(::std::time::SystemTimeError);
     }

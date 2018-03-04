@@ -201,11 +201,14 @@ mod tests {
         assert!(RSA::verify(signature, header_and_body, &secret).unwrap());
     }
 
-    // TODO: Create keys
-    // #[test]
-    #[allow(dead_code)]
+    #[test]
     fn test_ecdsa() {
-        unimplemented!()
+        let secret = ecdsa_private_key();
+        let header_and_body = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==";
+        let signature = ECDSA::sign(header_and_body, &secret, Algorithm::ES256).unwrap();
+
+        let secret = ecdsa_public_key();
+        assert!(ECDSA::verify(signature, header_and_body, &secret).unwrap());
     }
 
     fn rsa_public_key () -> PathBuf {
@@ -224,8 +227,6 @@ mod tests {
         base_path
     }
 
-    // TODO: Create key
-    #[allow(dead_code)]
     fn ecdsa_public_key () -> PathBuf {
         let mut base_path = env::current_dir().unwrap();
         base_path.push("resources");
@@ -234,8 +235,6 @@ mod tests {
         base_path
     }
 
-    // TODO: Create key
-    #[allow(dead_code)]
     fn ecdsa_private_key () -> PathBuf {
         let mut base_path = env::current_dir().unwrap();
         base_path.push("resources");

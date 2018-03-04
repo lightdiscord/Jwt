@@ -8,6 +8,8 @@
 
 //! Sign or verify a signature
 
+#![allow(unused_variables)]
+
 use ::error;
 use ::Signature;
 use ::algorithm::Algorithm;
@@ -16,9 +18,9 @@ use std::io::Read;
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
-//use openssl::rsa::Rsa;
-use openssl::sign::{Signer/*, Verifier*/};
-//use openssl::ec::EcKey;
+use openssl::sign::{Signer, Verifier};
+use openssl::ec::EcKey;
+use openssl::rsa::Rsa;
 
 use base64;
 
@@ -72,7 +74,7 @@ pub trait Sign {
 impl Sign for HMAC {
     type Error = error::Error;
 
-    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> Result<BindSignature<'data>, Self::Error> {
+    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> error::Result<BindSignature<'data>> {
         let digest: MessageDigest = algorithm.into();
 
         let key = PKey::hmac(&key.as_key()?)?;
@@ -104,9 +106,78 @@ impl Sign for HMAC {
     }
 }
 
+impl Sign for RSA {
+    type Error = error::Error;
+
+    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> error::Result<BindSignature<'data>> {
+        let digest: MessageDigest = algorithm.into();
+
+        let key = Rsa::private_key_from_pem(&key.as_key()?)?;
+        let key = PKey::from_rsa(key)?;
+        let mut signer = Signer::new(digest, &key)?;
+        let _ = signer.update(data.as_bytes())?;
+
+        let signature = signer.sign_to_vec()?;
+        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
+        let signature = BindSignature(Signature::new(signature), algorithm);
+
+        Ok(signature)
+    }
+
+    fn verify<K: AsKey>(signature: BindSignature, data: &str, key: &K) -> error::Result<bool> {
+        let BindSignature(signature, algorithm) = signature;
+        let Signature(signature) = signature;
+        let signature = signature.into_owned();
+        let signature = base64::decode_config(&signature, base64::URL_SAFE)?;
+
+        let key = Rsa::public_key_from_pem(&key.as_key()?)?;
+        let key = PKey::from_rsa(key)?;
+        let digest: MessageDigest = algorithm.into();
+        let mut verifier = Verifier::new(digest, &key)?;
+        let _ = verifier.update(data.as_bytes())?;
+
+        Ok(verifier.verify(&signature)?)
+    }
+}
+
+impl Sign for ECDSA {
+    type Error = error::Error;
+
+    fn sign<'data, K: AsKey>(data: &'data str, key: &K, algorithm: Algorithm) -> error::Result<BindSignature<'data>> {
+        let digest: MessageDigest = algorithm.into();
+
+        let key = EcKey::private_key_from_pem(&key.as_key()?)?;
+        let key = PKey::from_ec_key(key)?;
+        let mut signer = Signer::new(digest, &key)?;
+        let _ = signer.update(data.as_bytes())?;
+
+        let signature = signer.sign_to_vec()?;
+        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
+        let signature = BindSignature(Signature::new(signature), algorithm);
+
+        Ok(signature)
+    }
+
+    fn verify<K: AsKey>(signature: BindSignature, data: &str, key: &K) -> error::Result<bool> {
+        let BindSignature(signature, algorithm) = signature;
+        let Signature(signature) = signature;
+        let signature = signature.into_owned();
+        let signature = base64::decode_config(&signature, base64::URL_SAFE)?;
+
+        let key = PKey::public_key_from_pem(&key.as_key()?)?;
+        let digest: MessageDigest = algorithm.into();
+        let mut verifier = Verifier::new(digest, &key)?;
+        let _ = verifier.update(data.as_bytes())?;
+
+        Ok(verifier.verify(&signature)?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::env;
 
     #[test]
     fn test_hmac() {
@@ -117,183 +188,59 @@ mod tests {
         assert_eq!(signature.0, Signature::new("gS76BWOStsnrG9nMacQQE7ThHM1UIR2omB6YkBaQjZ0="));
         assert!(HMAC::verify(signature, header_and_body, &secret).unwrap());
     }
-}
-
-/*
-use std::fs::File;
-use std::path::PathBuf;
-use std::io::Read;
-use std::convert::Into;
-use std::fmt;
-use std::borrow::Cow;
-
-use openssl::hash::MessageDigest;
-use openssl::pkey::PKey;
-use openssl::rsa::Rsa;
-use openssl::sign::{Signer, Verifier};
-use openssl::ec::EcKey;
-
-use base64;
-
-use ::{ Result };
-use ::algorithm::Algorithm;
-
-/// Transform something into a key.
-pub trait AsKey {
-    /// Function that will turn it into a key
-    fn as_key(&self) -> Result<Vec<u8>>;
-}
-
-impl AsKey for PathBuf {
-    fn as_key(&self) -> Result<Vec<u8>> {
-        let mut file = File::open(self)?;
-        let mut buffer: Vec<u8> = Vec::new();
-        file.read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
-}
-
-impl AsKey for String {
-    fn as_key(&self) -> Result<Vec<u8>> {
-        Ok(self.as_bytes().to_vec())
-    }
-}
-
-/// Signature operations
-#[derive(Debug, Clone)]
-pub struct Signature<'signature>(pub Cow<'signature, str>, pub Algorithm);
-
-impl<'signature> fmt::Display for Signature<'signature> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<'signature> Signature<'signature> {
-    pub fn new<S>(raw: S, algorithm: Algorithm) -> Self where S: Into<Cow<'signature, str>> {
-        Signature(raw.into(), algorithm)
-    }
-
-    /// Sign a jwt using HMAC
-    pub fn hmac<P: AsKey>(data: &str, key_path: &P, algorithm: Algorithm) -> Result<Self> {
-        let digest: MessageDigest = algorithm.into();
-
-        let key = PKey::hmac(&key_path.as_key()?)?;
-        let mut signer = Signer::new(digest, &key)?;
-        let _ = signer.update(data.as_bytes())?;
-        let signature = signer.sign_to_vec()?;
-        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
-
-        Ok(Signature::new(signature, algorithm))
-    }
-
-    /// Sign a jwt using RSA
-    pub fn rsa<P: AsKey>(data: &str, private_key_path: &P, algorithm: Algorithm ) -> Result<Self> {
-        let digest: MessageDigest = algorithm.into();
-
-        let key = Rsa::private_key_from_pem(&private_key_path.as_key()?)?;
-        let key = PKey::from_rsa(key)?;
-
-        let mut signer = Signer::new(digest, &key)?;
-        signer.update(data.as_bytes())?;
-
-        let signature = signer.sign_to_vec()?;
-        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
-
-        Ok(Signature::new(signature, algorithm))
-    }
-
-    /// Sign a jwt using ECDSA
-    pub fn es<P: AsKey>(data: &str, private_key_path: &P, algorithm: Algorithm) -> Result<Self> {
-        let digest: MessageDigest = algorithm.into();
-
-        let key = EcKey::private_key_from_pem(&private_key_path.as_key()?)?;
-        let key = PKey::from_ec_key(key)?;
-
-        let mut signer = Signer::new(digest, &key)?;
-        signer.update(data.as_bytes())?;
-
-        let signature = signer.sign_to_vec()?;
-        let signature = base64::encode_config(signature.as_slice(), base64::URL_SAFE);
-
-        Ok(Signature::new(signature, algorithm))
-    }
-
-    /// Verify if a signature is valid
-    pub fn verify<P: AsKey>(&self, data: String, key: &P) -> Result<bool> {
-        let &Signature(ref signature, algorithm) = self;
-        let signature = signature.clone().into_owned();
-        let signature = &base64::decode_config(&signature, base64::URL_SAFE)?;
-
-        match algorithm {
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
-                let digest: MessageDigest = algorithm.into();
-
-                let key = &key.as_key()?;
-                let key = PKey::hmac(key)?;
-                let mut signer = Signer::new(digest, &key)?;
-                signer.update(data.as_bytes())?;
-                let other_signature = signer.sign_to_vec()?;
-
-                let result = compare(signature, &other_signature);
-                Ok(result)
-            },
-
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
-                let key = Rsa::public_key_from_pem(&key.as_key()?)?;
-                let key = PKey::from_rsa(key)?;
-
-                let digest: MessageDigest = algorithm.into();
-                let mut verifier = Verifier::new(digest, &key)?;
-                verifier.update(data.as_bytes())?;
-                Ok(verifier.verify(signature)?)
-            }
-
-            Algorithm::ES256 | Algorithm::ES384 | Algorithm::ES512 => {
-                let key = PKey::public_key_from_pem(&key.as_key()?)?;
-
-                let digest: MessageDigest = algorithm.into();
-                let mut verifier = Verifier::new(digest, &key)?;
-                verifier.update(data.as_bytes())?;
-                Ok(verifier.verify(signature)?)
-            }
-        }
-    }
-}
-
-fn compare(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-
-    let mut res: u8 = 0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        res |= x ^ y;
-    }
-
-    res == 0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::compare;
 
     #[test]
-    fn test_compare_same () {
-        let first = "The same!".as_bytes();
-        let second = "The same!".as_bytes();
-        let result = compare(first, second);
+    fn test_rsa() {
+        let secret = rsa_private_key();
+        let header_and_body = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==";
+        let signature = RSA::sign(header_and_body, &secret, Algorithm::RS256).unwrap();
 
-        assert!(result);
+        assert_eq!(signature.0, Signature::new("T_kaMgUEwSPbIab0VBvxC-4YmW_9MpTJiNDxFoZbs9TZPBMCggYW1FEmU3aI6B6Fs-eJPu-pkGz2VEbq6J7LLLF57ALxZKHxhdev1oa2Oik2lkVtbN7-KWgW0uTgaWRpmeOE4TPO4g8T5i3k9J-iaDResM_LswPLTwr92BychsapNl6SRRdSrDo_XJWOgXvS72Zw-1ZsjgJJMpVIF1ygD9m50ICiWyB6lVU-McvaSRWo3UBmipz-C6ApZMBQj1m6In89y-hEL-XpQ0flwBIMLyDHc7YmyWUiEXkHPAZ0tDD5wHBRk6N74o7cdjWeBh2ZFfvdWztjL1u8TYV3RBbSag=="));
+
+        let secret = rsa_public_key();
+        assert!(RSA::verify(signature, header_and_body, &secret).unwrap());
     }
 
-    #[test]
-    fn test_compare_different () {
-        let first = "The same!".as_bytes();
-        let second = "Not the same!".as_bytes();
-        let result = compare(first, second);
+    // TODO: Create keys
+    // #[test]
+    #[allow(dead_code)]
+    fn test_ecdsa() {
+        unimplemented!()
+    }
 
-        assert!(!result);
+    fn rsa_public_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("rsa.pub");
+
+        base_path
+    }
+
+    fn rsa_private_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("rsa.private.key");
+
+        base_path
+    }
+
+    // TODO: Create key
+    #[allow(dead_code)]
+    fn ecdsa_public_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("ecdsa.pub");
+
+        base_path
+    }
+
+    // TODO: Create key
+    #[allow(dead_code)]
+    fn ecdsa_private_key () -> PathBuf {
+        let mut base_path = env::current_dir().unwrap();
+        base_path.push("resources");
+        base_path.push("ecdsa.private.key");
+
+        base_path
     }
 }
-*/

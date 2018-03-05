@@ -15,7 +15,7 @@ error_chain!{
         Serde(::serde_json::Error);
         OpenSsl(::openssl::error::ErrorStack);
         Base64(::base64::DecodeError);
-        //Time(::std::time::SystemTimeError);
+        Time(::std::time::SystemTimeError);
     }
 
     errors {

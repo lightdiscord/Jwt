@@ -15,20 +15,23 @@
 extern crate openssl;
 extern crate base64;
 #[macro_use] extern crate error_chain;
-
-#[cfg(not(test))] extern crate serde_json;
-#[cfg(test)] #[macro_use] extern crate serde_json;
+#[macro_use] extern crate serde_json;
 
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::fmt;
+use std::time::{ SystemTime, UNIX_EPOCH };
 
 pub mod error;
 pub mod algorithm;
 pub mod signature;
+pub mod claims;
+pub mod verification;
 
 pub use error::Error;
 pub use algorithm::Algorithm;
+pub use claims::RegisteredClaims;
+pub use verification::Verifications;
 use signature::{ AsKey, Sign, HMAC, RSA, ECDSA, BindSignature };
 
 use serde_json::Value;
@@ -218,6 +221,58 @@ impl<'p> Payload<'p> {
     pub fn convert<T>(base: T) -> error::Result<Self> where T: AsBase64 {
         Ok(Payload::new(base.as_base64()?))
     }
+
+    /// Apply claims on payload
+    pub fn apply(self, claims: Vec<RegisteredClaims>) -> error::Result<Payload<'p>> {
+        let payload = self.from_base64()?;
+        let mut payload: Value = serde_json::from_slice(&payload)?;
+
+        for claim in claims {
+            payload[claim.to_string()] = claim.clone().into();
+        }
+
+        let payload = payload.as_base64()?;
+        let payload = Payload::new(payload);
+
+        Ok(payload)
+    }
+
+    /// Verify if a payload is valid
+    pub fn verify(&self, verification: Vec<Verifications>) -> error::Result<()> {
+        let payload = self.from_base64()?;
+        let payload: Value = serde_json::from_slice(&payload)?;
+
+        for verification in verification {
+            match verification {
+                Verifications::SameClaim(claim) => {
+                    let payload = &payload[claim.to_string()];
+                    let claim: Value = claim.clone().into();
+
+                    if *payload != claim {
+                        bail!(error::ErrorKind::VerificationFailed("same_claim".to_string()))
+                    }
+                },
+                Verifications::Expired => {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+                    let exp = payload["exp"].as_u64();
+
+                    if exp <= Some(now) {
+                        bail!(error::ErrorKind::VerificationFailed("token_expired".to_string()))
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<'p> FromBase64 for Payload<'p> {
+    fn from_base64(&self) -> error::Result<Vec<u8>> {
+        let convertion = &*self.0;
+        let convertion = base64::decode_config(&convertion, base64::URL_SAFE)?;
+        Ok(convertion)
+    }
 }
 
 impl<'p> fmt::Display for Payload<'p> {
@@ -245,7 +300,7 @@ impl<'s> fmt::Display for Signature<'s> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ Jwt, Algorithm, IntoParts, Header, Payload, Signature };
+    use super::{ Jwt, Algorithm, IntoParts, Header, Payload, Value, RegisteredClaims, Verifications, SystemTime, UNIX_EPOCH };
 
     #[test]
     fn jwt_from_str () {
@@ -275,6 +330,8 @@ mod tests {
 
     #[test]
     fn jwt_creation () {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
         let header = json!({});
         let header = Header::convert(header).unwrap();
 
@@ -282,15 +339,28 @@ mod tests {
             "light": "discord"
         });
         let payload = Payload::convert(payload).unwrap();
+        let payload = payload.apply(vec![
+            RegisteredClaims::Audience("FBI!".to_string()),
+            RegisteredClaims::Issuer("Test-man".to_string()),
+            RegisteredClaims::IssuedAt(now),
+            RegisteredClaims::ExpirationTime(now + 10),
+            RegisteredClaims::Custom("hello".to_string(), Value::String("world".to_string()))
+        ]).unwrap();
 
         let key = "This is super mega secret!".to_string();
         let jwt = Jwt::encode(&header, &payload, &key, Some(Algorithm::HS256)).unwrap();
         let jwt = jwt.into_parts().unwrap();
 
-        assert_eq!(jwt.signature, Signature::new("d__82nGH_wETtlGNPY_JD3x0fiJzpHMXvBAOxMw3aU8="));
+        let payload = jwt.payload.clone();
+        let _ = payload.verify(vec![
+            Verifications::SameClaim(RegisteredClaims::Issuer("Test-man".to_string())),
+            Verifications::SameClaim(RegisteredClaims::Custom("hello".to_string(), Value::String("world".to_string()))),
+            Verifications::Expired
+        ]);
 
         let jwt: Jwt = jwt.into();
 
+        println!("{:?}", jwt);
         assert!(jwt.decode(&key, None).is_ok());
     }
 
@@ -298,225 +368,3 @@ mod tests {
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==.gS76BWOStsnrG9nMacQQE7ThHM1UIR2omB6YkBaQjZ0="
     }
 }
-
-/*
-//extern crate serde;
-extern crate base64;
-extern crate openssl;
-
-#[macro_use]
-extern crate error_chain;
-
-#[macro_use]
-extern crate serde_json;
-
-use serde_json::Value as JsonValue;
-
-pub mod error;
-use error::*;
-
-pub mod algorithm;
-use algorithm::Algorithm;
-
-pub mod signature;
-use signature::{ Signature, AsKey };
-
-pub mod claims;
-use claims::RegisteredClaims;
-
-pub mod segments;
-use segments::{ Segments, Payload, Header };
-
-pub mod verification;
-use verification::Verifications;
-
-use std::borrow::Cow;
-
-const STANDARD_HEADER_TYPE: &str = "JWT";
-
-/// A simple Jwt
-#[derive(Debug, Clone)]
-pub struct Jwt<'jwt>(pub Cow<'jwt, str>);
-
-impl<'jwt> Jwt<'jwt> {
-    pub fn new<S>(raw: S) -> Self where S: Into<Cow<'jwt, str>> {
-        Jwt(raw.into())
-    }
-
-    /// Encode data into a Jwt
-    pub fn encode<P: AsKey>(
-        header: &Header,
-        payload: &Payload,
-        signing_key: &P,
-        algorithm: Algorithm,
-    ) -> error::Result<Self> {
-        let Header(mut header) = header.clone();
-        header["alg"] = JsonValue::String(algorithm.to_string());
-        header["typ"] = JsonValue::String(STANDARD_HEADER_TYPE.to_owned());
-        let header = Header(header);
-
-        let sign = format!("{}.{}", header, payload);
-
-        let signature = match algorithm {
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
-                Signature::hmac(&sign, signing_key, algorithm)?
-            }
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
-                Signature::rsa(&sign, signing_key, algorithm)?
-            }
-            Algorithm::ES256 | Algorithm::ES384 | Algorithm::ES512 => {
-                Signature::es(&sign, signing_key, algorithm)?
-            }
-        };
-
-        let token = Jwt::new(format!("{}.{}", sign, signature));
-
-        Ok(token)
-    }
-
-    /// Decode Token from a jwt
-    pub fn decode<P: AsKey>(&self, signing_key: &P) -> Result<Segments> {
-        let segments: Result<Segments> = self.clone().into();
-        let Segments(header, payload, signature) = segments?;
-
-        let combinaison = format!("{}.{}", header, payload);
-
-        println!("{:?}", signature);
-
-        if !signature.verify(combinaison, signing_key)? {
-            bail!(ErrorKind::InvalidSignature);
-        } else {
-            Ok(Segments(header, payload, signature))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::env;
-    use std::path::PathBuf;
-    use std::time::{ SystemTime, UNIX_EPOCH };
-    use super::{ Jwt, Algorithm, Payload, RegisteredClaims, Header, Verifications, Segments };
-
-    #[test]
-    fn test_sign_hs256 () {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-        let payload = json!({
-            "hello": "world",
-            "light": "discord"
-        });
-        let payload = Payload(payload);
-        let payload = payload.apply(vec![
-            RegisteredClaims::Issuer("Test-man!".to_string()),
-            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string()),
-            RegisteredClaims::IssuedAt(now),
-            RegisteredClaims::ExpirationTime(now + 10)
-        ]);
-
-        let secret = "This is super mega secret!".to_string();
-        let header = Header(json!({}));
-
-        let jwt = Jwt::encode(&header, &payload, &secret, Algorithm::HS256).unwrap();
-        println!("{:?}", jwt);
-
-        let result = jwt.decode(&secret);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_decode_valid_jwt_hs256 () {
-        let secret = "This is super mega secret!".to_string();
-        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let jwt = Jwt::new(jwt);
-        let result = jwt.decode(&secret);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_decode_invalid_jwt_hs256 () {
-        let secret = "This is super secret!".to_string();
-        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJoZWxsbyI6IndvcmxkIiwibGlnaHQiOiJkaXNjb3JkIn0=.cDX7rt5fNUG9itlV--5R6hzuNM4yrVR6DiQytrCdoRw=".to_string();
-        let jwt = Jwt::new(jwt);
-        let result = jwt.decode(&secret);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_sign_rs256 () {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-        let payload = json!({
-            "hello": "world",
-            "light": "discord"
-        });
-        let payload = Payload(payload);
-        let payload = payload.apply(vec![
-            RegisteredClaims::Issuer("Test-man!".to_string()),
-            RegisteredClaims::Audience("FBI! cuz' it's secret! shut!".to_string()),
-            RegisteredClaims::IssuedAt(now),
-            RegisteredClaims::ExpirationTime(now + 10)
-        ]);
-        let header = Header(json!({}));
-
-        let private_key = rsa_private_key();
-        let public_key = rsa_public_key();
-
-        let jwt = Jwt::encode(&header, &payload, &private_key, Algorithm::RS256).unwrap();
-        println!("{:?}", jwt);
-
-        let result = jwt.decode(&public_key);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_decode_valid_jwt_rs256 () {
-        let public_key = rsa_public_key();
-        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoiZGlzY29yZCJ9.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
-        let jwt = Jwt::new(jwt);
-        let result = jwt.decode(&public_key);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_decode_expired_jwt_rs256 () {
-        let public_key = rsa_public_key();
-        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiZXhwIjoxNTE5OTk0NTAxLCJoZWxsbyI6IndvcmxkIiwiaWF0IjoxNTE5OTk0NDkxLCJpc3MiOiJUZXN0LW1hbiEiLCJsaWdodCI6ImRpc2NvcmQifQ==.UqoZACmQeU3Cr1mcvMLdzqErJs_JaC7KClxDgQtt_J2d5dH_YCUzS11w0xE5Q09Ba7nA1UW3xgW6NYTpRNTnHETROJxPJ4GsTfyhLKbtFAoZy78VbLmXOpYvY1abF5dWxICJjY6sARUGajiZEK827Yt6Iiom0Mq0lwuuraW9xWLZjpZNuq1TDy5FuZRwx-fIPpo3_okHZoN5g3hrW_uTLqlsjJlotFvyfXJDhS1xPmyPjl1bH3ljuMv1HrTEOe3Gep1a0Mmbu3cjq9zee1fb46rrgpogap4N_DuLSJrgDvY7MVOXDNYAgllijeVhD2Xr1shCW8sIJ3RDaoQME5YW3Q==".to_string();
-        let jwt = Jwt::new(jwt);
-        let result = jwt.decode(&public_key).unwrap();
-        let Segments(_, payload, _) = result;
-
-        let result = payload.verify(vec![
-            Verifications::SameClaim(RegisteredClaims::Issuer("Test-man!".to_string())),
-            Verifications::Expired
-        ]);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_decode_invalid_jwt_rs256 () {
-        let public_key = rsa_public_key();
-        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJGQkkhIGN1eicgaXQncyBzZWNyZXQhIHNodXQhIiwiaGVsbG8iOiJ3b3JsZCIsImlzcyI6IlRlc3QtbWFuISIsImxpZ2h0IjoicGFzIGRpc2NvcmQifQ.iJ7xzImxSBFKYzYpI-iApq1gAV-nP1ibr3A8oB4-IDsDPWoOTNrgxAzeiZaH9qU3GgQ_gnd-DvlCz950zdP2LSRuusoO7hQC2VHcChje630Lb5HH-IdnDwYPJoblkmSGdaVv6c670c49QwvIhF8qILg1DWoc14uFeXDyNTADroWnCYqWem8gcD4yybrdbPlBNJbVKKCJIp1-wRpZ5U6jIclvwV0tuKTjsZPCgNBGkgL-b9qdofeZw52eXBoW3nXTKa9FvLzavi_moyT79PVzFZACE0mqRBM9E80RSkvCd21HxkzcaN-7pslLWiRkAIkfU0jJWBQZU5x_k6HIyl8whg==".to_string();
-        let jwt = Jwt::new(jwt);
-        let result = jwt.decode(&public_key);
-        assert!(result.is_err());
-    }
-
-    fn rsa_public_key () -> PathBuf {
-        let mut base_path = env::current_dir().unwrap();
-        base_path.push("resources");
-        base_path.push("rsa.pub");
-
-        base_path
-    }
-
-    fn rsa_private_key () -> PathBuf {
-        let mut base_path = env::current_dir().unwrap();
-        base_path.push("resources");
-        base_path.push("rsa.private.key");
-
-        base_path
-    }
-}
-*/

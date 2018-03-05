@@ -34,7 +34,10 @@ pub enum RegisteredClaims {
     IssuedAt(u64),
 
     /// "jti" (JWT ID) Claim
-    JwtId(String)
+    JwtId(String),
+
+    /// A custom claim
+    Custom(String, Value)
 }
 
 impl Into<Value> for RegisteredClaims {
@@ -47,6 +50,7 @@ impl Into<Value> for RegisteredClaims {
             RegisteredClaims::NotBefore(nbf) => json!(nbf),
             RegisteredClaims::IssuedAt(iat) => json!(iat),
             RegisteredClaims::JwtId(jti) => json!(jti),
+            RegisteredClaims::Custom(_, value) => value
         }
     }
 }
@@ -54,13 +58,14 @@ impl Into<Value> for RegisteredClaims {
 impl ToString for RegisteredClaims {
     fn to_string (&self) -> String {
         match *self {
-            RegisteredClaims::Issuer(_) => "iss",
-            RegisteredClaims::Subject(_) => "sub",
-            RegisteredClaims::Audience(_) => "aud",
-            RegisteredClaims::ExpirationTime(_) => "exp",
-            RegisteredClaims::NotBefore(_) => "nbf",
-            RegisteredClaims::IssuedAt(_) => "iat",
-            RegisteredClaims::JwtId(_) => "jti",
-        }.to_string()
+            RegisteredClaims::Issuer(_) => "iss".to_string(),
+            RegisteredClaims::Subject(_) => "sub".to_string(),
+            RegisteredClaims::Audience(_) => "aud".to_string(),
+            RegisteredClaims::ExpirationTime(_) => "exp".to_string(),
+            RegisteredClaims::NotBefore(_) => "nbf".to_string(),
+            RegisteredClaims::IssuedAt(_) => "iat".to_string(),
+            RegisteredClaims::JwtId(_) => "jti".to_string(),
+            RegisteredClaims::Custom(ref name, _) => name.to_owned()
+        }
     }
 }

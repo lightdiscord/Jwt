@@ -14,27 +14,86 @@
 
 extern crate openssl;
 extern crate base64;
-extern crate serde_json;
 #[macro_use] extern crate error_chain;
 
+#[cfg(not(test))] extern crate serde_json;
+#[cfg(test)] #[macro_use] extern crate serde_json;
+
 use std::borrow::Cow;
+use std::str::FromStr;
+use std::fmt;
 
 pub mod error;
 pub mod algorithm;
 pub mod signature;
 
 pub use error::Error;
+pub use algorithm::Algorithm;
+use signature::{ AsKey, Sign, HMAC, RSA, ECDSA, BindSignature };
 
 use serde_json::Value;
 
 /// A Simple Jwt
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Jwt<'jwt>(Cow<'jwt, str>);
 
 impl<'jwt> Jwt<'jwt> {
     /// Create a Jwt from any type who can be turned into a `Cow<'jwt, str>`
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'jwt, str>> {
         Jwt(raw.into())
+    }
+
+    /// Encode header and payload into a valid JWT
+    pub fn encode<K: AsKey>(header: &Header, payload: &Payload, key: &K, algorithm: Option<Algorithm>) -> error::Result<Self> {
+        let algorithm = match algorithm {
+            Some(algorithm) => algorithm,
+            None => header.as_algorithm()?
+        };
+
+        let header = header.from_base64()?;
+        let mut header: Value = serde_json::from_slice(&header)?;
+        header["alg"] = Value::String(algorithm.to_string());
+        header["typ"] = Value::String("JWT".to_owned());
+        let header = header.as_base64()?;
+        let header = Header::new(header);
+
+        let to_sign = format!("{}.{}", header, payload);
+
+        let signature = match algorithm {
+            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => HMAC::sign(&to_sign, key, algorithm)?,
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => RSA::sign(&to_sign, key, algorithm)?,
+            Algorithm::ES256 | Algorithm::ES384 | Algorithm::ES512 => ECDSA::sign(&to_sign, key, algorithm)?,
+        };
+
+        let token = Jwt::new(format!("{}.{}", to_sign, signature.0));
+
+        Ok(token)
+    }
+
+    /// Decode a Jwt token and check if signature is valid
+    pub fn decode<K: AsKey>(&self, key: &K, algorithm: Option<Algorithm>) -> error::Result<Parts> {
+        let parts = self.into_parts()?;
+        let Parts { header, payload, signature } = parts.clone();
+
+        let algorithm = match algorithm {
+            Some(algorithm) => algorithm,
+            None => header.as_algorithm()?
+        };
+
+        let data = format!("{}.{}", header, payload);
+        let signature = BindSignature(signature, algorithm);
+
+        let verification = match algorithm {
+            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => HMAC::verify(signature, &data, key)?,
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => RSA::verify(signature, &data, key)?,
+            Algorithm::ES256 | Algorithm::ES384 | Algorithm::ES512 => ECDSA::verify(signature, &data, key)?,
+        };
+
+        if !verification {
+            bail!(error::ErrorKind::InvalidSignature);
+        } else {
+            Ok(parts)
+        }
     }
 }
 
@@ -48,9 +107,9 @@ pub trait IntoParts<'c> {
 }
 
 impl<'jwt> IntoParts<'jwt> for Jwt<'jwt> {
-    type Error = ();
+    type Error = error::Error;
 
-    fn into_parts (&'jwt self) -> Result<Parts, Self::Error> {
+    fn into_parts (&'jwt self) -> error::Result<Parts> {
         let parts: Vec<&'jwt str> = self.0.split(".").collect();
 
         if parts.len() != 3 {
@@ -68,7 +127,7 @@ impl<'jwt> IntoParts<'jwt> for Jwt<'jwt> {
 }
 
 /// Transform something into base64
-trait AsBase64 {
+pub trait AsBase64 {
 
     /// Convert it!
     fn as_base64 (&self) -> error::Result<String>;
@@ -81,16 +140,30 @@ impl AsBase64 for Value {
     }
 }
 
+/// Transform something from base64
+pub trait FromBase64 {
+
+    /// Convert it!
+    fn from_base64 (&self) -> error::Result<Vec<u8>>;
+}
+
 /// Jwt's parts
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parts<'h, 'p, 's> {
     header: Header<'h>,
     payload: Payload<'p>,
     signature: Signature<'s>
 }
 
+impl<'h, 'p, 's, 'jwt> Into<Jwt<'jwt>> for Parts<'h, 'p, 's> {
+    fn into (self) -> Jwt<'jwt> {
+        let jwt = format!("{}.{}.{}", self.header.0, self.payload.0, self.signature.0);
+        Jwt::new(jwt)
+    }
+}
+
 /// Jwt's header
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Header<'h>(Cow<'h, str>);
 
 impl<'h> Header<'h> {
@@ -98,10 +171,41 @@ impl<'h> Header<'h> {
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'h, str>> {
         Header(raw.into())
     }
+
+    /// Convert a base64 transformable into a header.
+    pub fn convert<T>(base: T) -> error::Result<Self> where T: AsBase64 {
+        Ok(Header::new(base.as_base64()?))
+    }
+
+    /// In JWT's header you can have the field "alg" who provide which algorithm is used to sign your token.
+    /// We get this field and convert it into an algorithm.
+    pub fn as_algorithm(&self) -> error::Result<Algorithm> {
+        let header = self.from_base64()?;
+        let header = header.as_slice();
+        let header: Value = serde_json::from_slice(header)?;
+        let header = header["alg"].as_str().ok_or(error::ErrorKind::MissingAlgorithm)?;
+        let algorithm = Algorithm::from_str(header)?;
+
+        Ok(algorithm)
+    }
+}
+
+impl<'h> FromBase64 for Header<'h> {
+    fn from_base64(&self) -> error::Result<Vec<u8>> {
+        let convertion = &*self.0;
+        let convertion = base64::decode_config(&convertion, base64::URL_SAFE)?;
+        Ok(convertion)
+    }
+}
+
+impl<'h> fmt::Display for Header<'h> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// Jwt's payload
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Payload<'p>(Cow<'p, str>);
 
 impl<'p> Payload<'p> {
@@ -109,10 +213,21 @@ impl<'p> Payload<'p> {
     pub fn new<S>(raw: S) -> Self where S: Into<Cow<'p, str>> {
         Payload(raw.into())
     }
+
+    /// Convert a base64 transformable into a payload.
+    pub fn convert<T>(base: T) -> error::Result<Self> where T: AsBase64 {
+        Ok(Payload::new(base.as_base64()?))
+    }
+}
+
+impl<'p> fmt::Display for Payload<'p> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// Jwt's signature
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Signature<'s>(Cow<'s, str>);
 
 impl<'s> Signature<'s> {
@@ -122,9 +237,15 @@ impl<'s> Signature<'s> {
     }
 }
 
+impl<'s> fmt::Display for Signature<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ Jwt, IntoParts };
+    use super::{ Jwt, Algorithm, IntoParts, Header, Payload, Signature };
 
     #[test]
     fn jwt_from_str () {
@@ -150,6 +271,27 @@ mod tests {
         let parts = jwt.into_parts();
 
         println!("{:?}", parts);
+    }
+
+    #[test]
+    fn jwt_creation () {
+        let header = json!({});
+        let header = Header::convert(header).unwrap();
+
+        let payload = json!({
+            "light": "discord"
+        });
+        let payload = Payload::convert(payload).unwrap();
+
+        let key = "This is super mega secret!".to_string();
+        let jwt = Jwt::encode(&header, &payload, &key, Some(Algorithm::HS256)).unwrap();
+        let jwt = jwt.into_parts().unwrap();
+
+        assert_eq!(jwt.signature, Signature::new("d__82nGH_wETtlGNPY_JD3x0fiJzpHMXvBAOxMw3aU8="));
+
+        let jwt: Jwt = jwt.into();
+
+        assert!(jwt.decode(&key, None).is_ok());
     }
 
     fn test_jwt () -> &'static str {

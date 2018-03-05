@@ -1,5 +1,5 @@
 [package]
-name = "jwt"
+name = "libjwt"
 version = "0.1.0"
 authors = ["LightDiscord <arnaud@lightdiscord.me>"]
 repository = "https://github.com/LightDiscord/Jwt"

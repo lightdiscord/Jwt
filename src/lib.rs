@@ -154,9 +154,14 @@ pub trait FromBase64 {
 /// Jwt's parts
 #[derive(Debug, Clone)]
 pub struct Parts<'h, 'p, 's> {
-    header: Header<'h>,
-    payload: Payload<'p>,
-    signature: Signature<'s>
+    /// Header field
+    pub header: Header<'h>,
+
+    /// Payload field
+    pub payload: Payload<'p>,
+
+    /// Signature field
+    pub signature: Signature<'s>
 }
 
 impl<'h, 'p, 's, 'jwt> Into<Jwt<'jwt>> for Parts<'h, 'p, 's> {

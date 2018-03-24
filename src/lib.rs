@@ -16,6 +16,7 @@ extern crate openssl;
 extern crate base64;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate serde_json;
+#[macro_use] extern crate serde_derive;
 
 use std::borrow::Cow;
 use std::str::FromStr;
@@ -37,7 +38,7 @@ use signature::{ AsKey, Sign, HMAC, RSA, ECDSA, BindSignature };
 use serde_json::Value;
 
 /// A Simple Jwt
-#[derive(Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct Jwt<'jwt>(Cow<'jwt, str>);
 
 impl<'jwt> Jwt<'jwt> {
@@ -301,6 +302,15 @@ impl<'s> fmt::Display for Signature<'s> {
 #[cfg(test)]
 mod tests {
     use super::{ Jwt, Algorithm, IntoParts, Header, Payload, Value, RegisteredClaims, Verifications, SystemTime, UNIX_EPOCH };
+    use serde_json;
+
+    #[test]
+    fn jwt_serialize () {
+        let data = json!(test_jwt());
+        let data: Jwt = serde_json::from_value(data).unwrap();
+
+        assert_eq!(Jwt::new(test_jwt()), data)
+    }
 
     #[test]
     fn jwt_from_str () {
